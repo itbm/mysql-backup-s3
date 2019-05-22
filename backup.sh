@@ -2,6 +2,8 @@
 
 set -e
 
+>&2 echo "-----"
+
 if [ "${S3_ACCESS_KEY_ID}" == "**None**" ]; then
   echo "Warning: You did not set the S3_ACCESS_KEY_ID environment variable."
 fi
@@ -37,6 +39,12 @@ if [ "${S3_IAMROLE}" != "true" ]; then
   export AWS_DEFAULT_REGION=$S3_REGION
 fi
 
+if [ "${S3_ENDPOINT}" == "**None**" ]; then
+    AWS_ARGS=""
+  else
+    AWS_ARGS="--endpoint-url ${S3_ENDPOINT}"
+fi
+
 MYSQL_HOST_OPTS="-h $MYSQL_HOST -P $MYSQL_PORT -u$MYSQL_USER -p$MYSQL_PASSWORD"
 DUMP_START_TIME=$(date +"%Y-%m-%dT%H%M%SZ")
 
@@ -45,7 +53,7 @@ copy_s3 () {
   DEST_FILE=$2
 
   if [ "${ENCRYPTION_PASSWORD}" != "**None**" ]; then
-    echo "Encrypting ${SRC_FILE}"
+    >&2 echo "Encrypting ${SRC_FILE}"
     openssl enc -aes-256-cbc -in $SRC_FILE -out ${SRC_FILE}.enc -k $ENCRYPTION_PASSWORD
     if [ $? != 0 ]; then
       >&2 echo "Error encrypting ${SRC_FILE}"
@@ -53,12 +61,6 @@ copy_s3 () {
     rm $SRC_FILE
     SRC_FILE="${SRC_FILE}.enc"
     DEST_FILE="${DEST_FILE}.enc"
-  fi
-
-  if [ "${S3_ENDPOINT}" == "**None**" ]; then
-    AWS_ARGS=""
-  else
-    AWS_ARGS="--endpoint-url ${S3_ENDPOINT}"
   fi
 
   echo "Uploading ${DEST_FILE} on S3..."
@@ -71,6 +73,7 @@ copy_s3 () {
 
   rm $SRC_FILE
 }
+
 # Multi file: yes
 if [ ! -z "$(echo $MULTI_FILES | grep -i -E "(yes|true|1)")" ]; then
   if [ "${MYSQLDUMP_DATABASE}" == "--all-databases" ]; then
@@ -118,23 +121,27 @@ else
   fi
 fi
 
-
 if [ "${DELETE_OLDER_THAN}" != "**None**" ]; then
+  >&2 echo "Checking for files older than ${DELETE_OLDER_THAN}"
   aws $AWS_ARGS s3 ls s3://$S3_BUCKET/$S3_PREFIX/ | grep " PRE " -v | while read -r line;
     do
+      fileName=`echo $line|awk {'print $4'}`
       created=`echo $line|awk {'print $1" "$2'}`
       created=`date -d "$created" +%s`
       older_than=`date -d "$DELETE_OLDER_THAN" +%s`
       if [ $created -lt $older_than ]
         then
-          fileName=`echo $line|awk {'print $4'}`
           if [ $fileName != "" ]
             then
-              printf 'Deleting "%s"\n' $fileName
+              >&2 echo "DELETING ${fileName}"
               aws $AWS_ARGS s3 rm s3://$S3_BUCKET/$S3_PREFIX/$fileName
           fi
+      else
+          >&2 echo "${fileName} not older than ${DELETE_OLDER_THAN}"
       fi
     done;
 fi
 
 echo "SQL backup finished"
+
+>&2 echo "-----"
