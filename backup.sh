@@ -116,6 +116,7 @@ else
   else
     >&2 echo "Error creating dump of all databases"
   fi
+fi
 
 
 if [ "${DELETE_OLDER_THAN}" != "**None**" ]; then
